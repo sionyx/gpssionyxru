@@ -2,48 +2,42 @@
 <html>
 <head>
 	<meta charset="utf-8">
-	<link rel="canonical" href="http://ourlove.ws/pages/about/">
-	<title>Travel - Filipp Panfilov</title>
-    <script src="//api-maps.yandex.ru/2.1/?lang=ru_RU" type="text/javascript"></script>
-	<script type="text/javascript">
-		ymaps.ready(init);
-		var myMap; 
-		function init() {
+	<title>Travel Map</title>
+    <script src="https://maps.googleapis.com/maps/api/js?v=3.exp"></script>
 
 <?php 
 	require_once("src/FoursquareAPI.class.php");
-	$name = array_key_exists("name",$_GET) ? $_GET['name'] : "Foursquare";
+	require_once("src/MapHelper.class.php");
+	$client_key = "";
+	$client_secret = "";  
+	$auth_token = "";
 
-	// Set your client key and secret
-	$client_key = "DRQMOPUSYDKJQ1LQXPWJ45RI42UAFLRZUSPSU021OYSFDF51";
-	$client_secret = "MQCQ3AFCBDU2UTH43H5J2VDP15ZKZJIJRHSAKULTB3JCQYP5";  
-	// Set your auth token, loaded using the workflow described in tokenrequest.php
-	$auth_token = "B0YGZPZVOOKVO4N2U3ZNMETMMGWTRGIA0M1GJS5VLPCC2CUQ";
-	// Load the Foursquare API library
 	$foursquare = new FoursquareAPI($client_key,$client_secret);
 	$foursquare->SetAccessToken($auth_token);
-
-	$params = array("limit"=>30);
-
+	$params = array("limit" => 250, 
+		            "afterTimestamp" => 1403049600);
 	$response = $foursquare->GetPrivate("users/self/checkins",$params);
- 
-	$route = 0;
-	$polyline[$route] = "";
 	$places = array();
 	
 	$checkins = json_decode($response);
 	$reversedItems = array_reverse($checkins->response->checkins->items);
+	$distance = 0;
 	foreach($reversedItems as $item):
+		if (isset($location)){
+			$distance += MapHelper::vincentyGreatCircleDistance($location->lat, $location->lng, $item->venue->location->lat, $item->venue->location->lng) / 1000;
+		}
 		$location = $item->venue->location;
 		if (isset($location->city))
 		{
 			$city = $location->city . ", ";
 		}
-		else {
+		else 
+		{
 			$city = "";
 		}
-		$polyline[$route] .= "[ " . $location->lat . ", " . $location->lng . "], ";
-		$places[] = array('time' => $item->createdAt, 
+		$time = $item->createdAt - $item->timeZoneOffset;
+		
+		$places[] = array('time' => $time, 
 			              'descr' => $item->venue->name, 
 			              'la' => $location->lat, 
 			              'lo' => $location->lng, 
@@ -52,59 +46,58 @@
 	endforeach
 ?>
 
-    myMap = new ymaps.Map("map", {
-            center: <? echo "[ " . $location->lat . ", " . $location->lng . "]"; ?>,
-            zoom: 16
-        });
+	<script>
+		var myPlacemark;
+		var map;
+		function initialize() {
+		    var mapCenter = new google.maps.LatLng(<?= $location->lat ?>, <?= $location->lng ?>);
+		    var mapOptions = {
+		    	zoom: 15,
+		    	center: mapCenter,
+		    	mapTypeId: google.maps.MapTypeId.ROADMAP
+		    };
+	    	map = new google.maps.Map(document.getElementById('map-canvas'), mapOptions);
+			var flightPlanCoordinates = [
+				<? foreach($places as $place): ?>
+			    new google.maps.LatLng(<?= $place['la'] ?>, <?= $place['lo'] ?>),
+			    <? endforeach ?>
+			];
 
-    // Создаем ломаную с помощью вспомогательного класса Polyline.
-    var myPolyline = new ymaps.Polyline([
-    <?php echo $polyline[$route]; ?>
+			var flightPath = new google.maps.Polyline({
+			    path: flightPlanCoordinates,
+			    geodesic: true,
+			    strokeColor: '#FF0000',
+			    strokeOpacity: 1.0,
+			    strokeWeight: 2
+			});
 
-        ], {}, {
-            strokeWidth: 4,
-            strokeOpacity: 1,
-            strokeStyle: '3 2'
-        });
+  			flightPath.setMap(map);
+  			myPlacemark = new google.maps.Marker({
+						    position: mapCenter,
+						    map: map,
+						    draggable: false,
+    						animation: google.maps.Animation.DROP
+			});
+  		}
+  		google.maps.event.addDomListener(window, 'load', initialize);
+		
 
-    // Добавляем линии на карту.
-	    myMap.geoObjects
-	        .add(myPolyline);
-	}
 
     function PutPlaceMark(la, lo, title)
     {
-		myPlacemark = new ymaps.GeoObject({
-            // Описание геометрии.
-            geometry: {
-                type: "Point",
-                coordinates: [la, lo]
-            },
-            // Свойства.
-            properties: {
-                // Контент метки.
-                iconContent: title,
-                hintContent: ''
-            }
-        }, {
-            // Опции.
-            // Иконка метки будет растягиваться под размер ее содержимого.
-            preset: 'islands#blackStretchyIcon'
-            // Метку можно перемещать.
-            //draggable: true
-        });       
-
-		myMap.geoObjects.add(myPlacemark);    
+		myPlacemark = new google.maps.Marker({
+						    position: new google.maps.LatLng(la, lo),
+						    map: map
+		});
+		myPlacemark.setMap(map);  
     }
 
     function MoveToLL(la, lo, title)
     {
-    	LA = parseFloat(la);
-    	LO = parseFloat(lo);
-    	myMap.setCenter([LA, LO], 16, { checkZoomRange: true });
-
-    	myMap.geoObjects.remove(myPlacemark);
-    	PutPlaceMark(LA, LO, title);
+    	map.setCenter(new google.maps.LatLng(la, lo));
+    	map.setZoom(15);
+    	myPlacemark.setMap(null);
+    	PutPlaceMark(la, lo, title);
     }
 	</script>
 	<script>
@@ -120,9 +113,10 @@
 	</script>
 </head>
 <body>
-	<div id="map" style="width:640px; height:480px"></div>
+	<p>Distance covered: <b><?= number_format($distance, 2, '.', ' ') ?></b> km.</p>
+	<div id="map-canvas" style="width:650px; height:480px"></div>
 	<? foreach($places as $place): ?>
-		<p> <?= gmdate("H:i d.m", $place['time']) ?> GMT: <a href="#" onclick="MoveToLL(<?= $place['la'] ?>, <?= $place['lo'] ?>, '<?= htmlentities($place['descr'], ENT_QUOTES, "UTF-8") ?>'); return false;">
+		<p class=""> <?= gmdate("H:i d.m", $place['time']) ?> GMT: <a href="#" onclick="MoveToLL(<?= $place['la'] ?>, <?= $place['lo'] ?>, '<?= htmlentities($place['descr'], ENT_QUOTES, "UTF-8") ?>'); return false;">
 		<?= htmlentities($place['descr'], ENT_QUOTES, "UTF-8") ?></a>, <?= $place['city'] . " " . $place['country'] ?> </p>		
 	<? endforeach ?>
 </body>
